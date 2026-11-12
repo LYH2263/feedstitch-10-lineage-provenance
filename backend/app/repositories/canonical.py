@@ -5,14 +5,17 @@ import sqlite3
 from typing import Any
 
 
+_SELECT = """
+    SELECT c.id, c.business_key, c.title, c.price, c.category, c.source_id,
+           s.name AS source_name, c.event_ts, c.source_revision, c.run_id,
+           c.lineage_id, c.payload_json, c.updated_at
+    FROM canonical_items c
+    LEFT JOIN sources s ON s.id = c.source_id
+"""
+
+
 def list_items(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT id, business_key, title, price, category, source_id,
-               event_ts, source_revision, payload_json, updated_at
-        FROM canonical_items ORDER BY business_key
-        """
-    ).fetchall()
+    rows = conn.execute(_SELECT + " ORDER BY c.business_key").fetchall()
     out = []
     for r in rows:
         d = dict(r)
@@ -22,14 +25,7 @@ def list_items(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def get_by_key(conn: sqlite3.Connection, business_key: str) -> dict[str, Any] | None:
-    row = conn.execute(
-        """
-        SELECT id, business_key, title, price, category, source_id,
-               event_ts, source_revision, payload_json, updated_at
-        FROM canonical_items WHERE business_key = ?
-        """,
-        (business_key,),
-    ).fetchone()
+    row = conn.execute(_SELECT + " WHERE c.business_key = ?", (business_key,)).fetchone()
     if not row:
         return None
     d = dict(row)
@@ -37,13 +33,21 @@ def get_by_key(conn: sqlite3.Connection, business_key: str) -> dict[str, Any] | 
     return d
 
 
-def upsert_item(conn: sqlite3.Connection, item: dict[str, Any], source_id: int) -> None:
+def upsert_item(
+    conn: sqlite3.Connection,
+    item: dict[str, Any],
+    source_id: int,
+    *,
+    run_id: int | None = None,
+    lineage_id: int | None = None,
+) -> None:
     conn.execute(
         """
         INSERT INTO canonical_items(
             business_key, title, price, category, source_id,
-            event_ts, source_revision, payload_json, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+            event_ts, source_revision, payload_json, updated_at,
+            run_id, lineage_id
+        ) VALUES (?,?,?,?,?,?,?,?,datetime('now'),?,?)
         ON CONFLICT(business_key) DO UPDATE SET
             title=excluded.title,
             price=excluded.price,
@@ -52,7 +56,9 @@ def upsert_item(conn: sqlite3.Connection, item: dict[str, Any], source_id: int) 
             event_ts=excluded.event_ts,
             source_revision=excluded.source_revision,
             payload_json=excluded.payload_json,
-            updated_at=datetime('now')
+            updated_at=datetime('now'),
+            run_id=excluded.run_id,
+            lineage_id=excluded.lineage_id
         """,
         (
             item["business_key"],
@@ -63,6 +69,8 @@ def upsert_item(conn: sqlite3.Connection, item: dict[str, Any], source_id: int) 
             item["event_ts"],
             item["source_revision"],
             json.dumps(item["payload"], ensure_ascii=False),
+            run_id,
+            lineage_id,
         ),
     )
 

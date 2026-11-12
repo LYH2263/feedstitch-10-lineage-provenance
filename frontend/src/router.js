@@ -6,6 +6,7 @@ import Workbench from './pages/Workbench.vue'
 import Staging from './pages/Staging.vue'
 import Conflicts from './pages/Conflicts.vue'
 import Canonical from './pages/Canonical.vue'
+import Lineage from './pages/Lineage.vue'
 import Watermarks from './pages/Watermarks.vue'
 
 export default createRouter({
@@ -18,6 +19,7 @@ export default createRouter({
     { path: '/staging', component: Staging },
     { path: '/conflicts', component: Conflicts },
     { path: '/canonical', component: Canonical },
+    { path: '/lineage', component: Lineage },
     { path: '/watermarks', component: Watermarks },
   ],
 })

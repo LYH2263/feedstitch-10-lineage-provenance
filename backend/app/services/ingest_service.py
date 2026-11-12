@@ -7,6 +7,7 @@ from app.config import FIXTURES_DIR
 from app.db import connect
 from app.engines.merge_rules import decide_merge, eligible_for_incremental
 from app.engines.parse_feed import parse_fixture
+from app.modules import lineage_provenance as lineage
 from app.repositories import canonical as canon_repo
 from app.repositories import runs as runs_repo
 from app.repositories import sources as sources_repo
@@ -70,6 +71,7 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
         skipped = 0
         max_event_ts: str | None = source.get("watermark_ts")
         dispositions: list[str] = []
+        written_keys: list[str] = []
 
         for item in items:
             parsed += 1
@@ -104,7 +106,20 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
 
             decision = decide_merge(existing_view, item)
             if decision in ("insert", "upsert"):
-                canon_repo.upsert_item(conn, item, source_id)
+                lineage_id = lineage.record_write(
+                    conn,
+                    item=item,
+                    source_id=source_id,
+                    run_id=run_id,
+                    action=decision,
+                )
+                canon_repo.upsert_item(
+                    conn,
+                    item,
+                    source_id,
+                    run_id=run_id,
+                    lineage_id=lineage_id,
+                )
                 runs_repo.insert_staging(
                     conn,
                     run_id=run_id,
@@ -114,6 +129,7 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
                 )
                 upserted += 1
                 dispositions.append(decision)
+                written_keys.append(item["business_key"])
                 if max_event_ts is None or item["event_ts"] > max_event_ts:
                     max_event_ts = item["event_ts"]
             elif decision == "conflict":
@@ -121,10 +137,14 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
                     conn,
                     run_id=run_id,
                     source_id=source_id,
-                    business_key=item["business_key"],
+                    item=item,
                     existing_payload=existing_view["payload"] if existing_view else {},
-                    incoming_payload=item["payload"],
                     reason="non_key_field_mismatch",
+                    existing_source_id=existing["source_id"] if existing else None,
+                    existing_run_id=existing["run_id"] if existing else None,
+                    existing_lineage_id=existing["lineage_id"] if existing else None,
+                    existing_event_ts=existing["event_ts"] if existing else None,
+                    existing_revision=existing["source_revision"] if existing else None,
                 )
                 runs_repo.insert_staging(
                     conn,
@@ -153,7 +173,9 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
         if max_event_ts:
             sources_repo.set_watermark(conn, source_id, max_event_ts)
 
+        written_keys = list(dict.fromkeys(written_keys))
         canonical_count = canon_repo.count_items(conn)
+        lineage_check = lineage.reconciliation(conn, run_id, upserted)
         report = {
             "source_id": source_id,
             "mode": mode,
@@ -162,8 +184,15 @@ def run_ingest(source_id: int, mode: str = "incremental") -> dict[str, Any]:
             "conflict_count": conflicts,
             "skipped_count": skipped,
             "canonical_count": canonical_count,
+            "lineage_event_count": lineage_check["lineage_written_count"],
+            "lineage_distinct_keys": lineage_check["lineage_distinct_keys"],
+            "lineage_reconciles": lineage_check["lineage_reconciles"],
+            "canonical_lineage_pointers_ok": lineage_check[
+                "canonical_lineage_pointers_ok"
+            ],
             "watermark_ts": max_event_ts,
             "dispositions": dispositions,
+            "written_keys": written_keys,
         }
         runs_repo.finish_run(
             conn,
@@ -186,6 +215,7 @@ def dashboard_stats() -> dict[str, Any]:
     conn = connect()
     try:
         sources = sources_repo.list_sources(conn)
+        lineage_stats = lineage.summary(conn)
         return {
             "source_count": len(sources),
             "enabled_sources": sum(1 for s in sources if s["enabled"]),
@@ -193,6 +223,8 @@ def dashboard_stats() -> dict[str, Any]:
             "conflict_count": conn.execute("SELECT COUNT(*) c FROM conflicts").fetchone()["c"],
             "run_count": conn.execute("SELECT COUNT(*) c FROM runs").fetchone()["c"],
             "staging_count": conn.execute("SELECT COUNT(*) c FROM staging_rows").fetchone()["c"],
+            "lineage_event_count": lineage_stats["lineage_event_count"],
+            "canonical_with_lineage": lineage_stats["canonical_with_lineage"],
         }
     finally:
         conn.close()

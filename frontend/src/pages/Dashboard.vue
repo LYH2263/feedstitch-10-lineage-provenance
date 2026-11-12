@@ -24,8 +24,12 @@ onMounted(async () => {
       <div class="tile"><div class="hero-num">{{ stats.conflict_count }}</div><div class="muted">冲突</div></div>
       <div class="tile"><div class="hero-num">{{ stats.run_count }}</div><div class="muted">Runs</div></div>
       <div class="tile"><div class="hero-num">{{ stats.staging_count }}</div><div class="muted">Staging</div></div>
+      <div class="tile"><div class="hero-num">{{ stats.lineage_event_count }}</div><div class="muted">血缘事件</div></div>
+      <div class="tile"><div class="hero-num">{{ stats.canonical_with_lineage }}</div><div class="muted">已挂血缘</div></div>
       <div class="tile"><div class="hero-num">{{ stats.enabled_sources }}</div><div class="muted">启用源</div></div>
     </div>
     <router-link to="/workbench">去运行台跑一趟 →</router-link>
+    <span class="muted"> · </span>
+    <router-link to="/lineage">按业务键查血缘 →</router-link>
   </div>
 </template>

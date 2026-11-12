@@ -143,25 +143,38 @@ def insert_conflict(
     *,
     run_id: int,
     source_id: int,
-    business_key: str,
+    item: dict[str, Any],
     existing_payload: dict[str, Any],
-    incoming_payload: dict[str, Any],
     reason: str,
+    existing_source_id: int | None = None,
+    existing_run_id: int | None = None,
+    existing_lineage_id: int | None = None,
+    existing_event_ts: str | None = None,
+    existing_revision: int | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO conflicts(
             run_id, source_id, business_key, existing_payload, incoming_payload,
-            reason, created_at
-        ) VALUES (?,?,?,?,?,?,datetime('now'))
+            reason, created_at, incoming_revision, incoming_event_ts,
+            existing_source_id, existing_revision, existing_event_ts,
+            existing_run_id, existing_lineage_id
+        ) VALUES (?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),?,?,?,?,?,?,?)
         """,
         (
             run_id,
             source_id,
-            business_key,
+            item["business_key"],
             json.dumps(existing_payload, ensure_ascii=False),
-            json.dumps(incoming_payload, ensure_ascii=False),
+            json.dumps(item["payload"], ensure_ascii=False),
             reason,
+            int(item["source_revision"]),
+            item["event_ts"],
+            existing_source_id,
+            existing_revision,
+            existing_event_ts,
+            existing_run_id,
+            existing_lineage_id,
         ),
     )
 
@@ -169,9 +182,17 @@ def insert_conflict(
 def list_conflicts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT id, run_id, source_id, business_key, existing_payload, incoming_payload,
-               reason, created_at
-        FROM conflicts ORDER BY id DESC
+        SELECT c.id, c.run_id, c.source_id, s.name AS source_name,
+               c.business_key, c.existing_payload, c.incoming_payload,
+               c.reason, c.created_at,
+               c.incoming_revision, c.incoming_event_ts,
+               c.existing_source_id, es.name AS existing_source_name,
+               c.existing_revision, c.existing_event_ts,
+               c.existing_run_id, c.existing_lineage_id
+        FROM conflicts c
+        LEFT JOIN sources s ON s.id = c.source_id
+        LEFT JOIN sources es ON es.id = c.existing_source_id
+        ORDER BY c.id DESC
         """
     ).fetchall()
     out = []

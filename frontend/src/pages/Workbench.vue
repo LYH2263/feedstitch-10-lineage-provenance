@@ -36,7 +36,7 @@ onMounted(async () => {
 <template>
   <div class="page">
     <h1>运行台</h1>
-    <p class="muted">选源触发增量或全量；报告中的成功 / 冲突 / Canonical 总数需与列表页互证。</p>
+    <p class="muted">选源触发增量或全量；报告中的成功写入数须与本 run 新增的成功血缘条数互相解释。</p>
     <div class="panel">
       <label>
         源
@@ -67,13 +67,33 @@ onMounted(async () => {
         skipped {{ last.skipped_count }}
       </p>
       <p class="mono muted">canonical_count={{ last.report?.canonical_count }} watermark={{ last.report?.watermark_ts }}</p>
+      <p>
+        本 run 新增成功血缘
+        <strong>{{ last.report?.lineage_event_count }}</strong> 条（覆盖
+        {{ last.report?.lineage_distinct_keys }} 个业务键）·
+        <span class="tag" :class="last.report?.lineage_reconciles ? 'ok' : 'danger'">
+          {{ last.report?.lineage_reconciles ? '写入数 = 血缘条数' : '写入数与血缘条数不一致' }}
+        </span>
+        <span class="tag" :class="last.report?.canonical_lineage_pointers_ok ? 'ok' : 'warn'">
+          {{ last.report?.canonical_lineage_pointers_ok ? 'Canonical 已指向最新血缘' : 'Canonical 指针待核对' }}
+        </span>
+      </p>
+      <p v-if="last.report?.written_keys?.length" class="muted">
+        本 run 写入的业务键：
+        <router-link
+          v-for="k in last.report.written_keys"
+          :key="k"
+          :to="`/lineage?key=${encodeURIComponent(k)}`"
+          style="margin-right:0.5rem"
+        >{{ k }} ↗</router-link>
+      </p>
     </div>
     <div class="panel">
       <h3>历史 Runs</h3>
       <table>
         <thead>
           <tr>
-            <th>ID</th><th>源</th><th>模式</th><th>状态</th><th>parsed</th><th>upserted</th><th>conflict</th><th>skipped</th><th>时间</th>
+            <th>ID</th><th>源</th><th>模式</th><th>状态</th><th>parsed</th><th>upserted</th><th>血缘</th><th>conflict</th><th>skipped</th><th>时间</th>
           </tr>
         </thead>
         <tbody>
@@ -84,6 +104,11 @@ onMounted(async () => {
             <td><span class="tag" :class="r.status === 'ok' ? 'ok' : 'danger'">{{ r.status }}</span></td>
             <td>{{ r.parsed_count }}</td>
             <td>{{ r.upserted_count }}</td>
+            <td>
+              <span class="mono" :class="r.report?.lineage_event_count === r.upserted_count ? '' : 'warn'">
+                {{ r.report?.lineage_event_count ?? '—' }}
+              </span>
+            </td>
             <td>{{ r.conflict_count }}</td>
             <td>{{ r.skipped_count }}</td>
             <td class="mono">{{ r.created_at }}</td>
@@ -93,3 +118,6 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+<style scoped>
+.warn { color: var(--warn); }
+</style>
